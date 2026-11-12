@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simulasi UTS Anatomi</title>
     
-    <!-- PENGGANTI COMPILER: Menggunakan Babel 7 terbaru agar tidak crash saat membaca JavaScript modern -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -75,12 +74,9 @@
             { id: 5, question: "Dalam prosedur medis transfusi darah, dikenal istilah Donor Universal dan Resipien Universal. Jelaskan maknanya dan sebutkan golongan darah lengkap (sistem ABO dan Rh) yang mewakili keduanya!", keyAnswer: "• Donor Universal (Golongan Darah O-): Dapat mendonorkan sel darah merah ke SEMUA golongan darah karena eritrositnya tidak memiliki antigen A, antigen B, maupun antigen Rhesus (Rh).\n• Resipien Universal (Golongan Darah AB+): Dapat menerima transfusi darah dari SEMUA golongan karena plasma darahnya tidak memiliki antibodi penolak (anti-A, anti-B) dan sudah memiliki faktor Rhesus positif." }
         ];
 
-        // --- Fungsi pembantu agar tidak bentrok (tanpa optional chaining) ---
         const scrollToHeader = () => {
             const header = document.getElementById('header-title');
-            if (header) {
-                header.scrollIntoView({ behavior: 'smooth' });
-            }
+            if (header) { header.scrollIntoView({ behavior: 'smooth' }); }
         };
 
         const MultipleChoiceTab = ({ state, setState }) => {
@@ -227,7 +223,11 @@
                     }))
                 );
 
-                const promptText = "Anda adalah Dosen Anatomi S1 Farmasi. Evaluasi jawaban mahasiswa berdasarkan kunci jawaban referensi. Berikan nilai (0 hingga 100) dan umpan balik analitis singkat (maks 2 kalimat) dalam bahasa Indonesia.\n\nData Ujian:\n" + examDataString;
+                // Instruksi format JSON yang diperketat agar AI wajib mengembalikan array berformat angka valid
+                const promptText = "Anda adalah Dosen Anatomi S1 Farmasi. Evaluasi jawaban mahasiswa berdasarkan kunci jawaban referensi.\n" +
+                    "Berikan output HANYA dalam bentuk format JSON ARRAY murni tanpa teks pembuka/penutup, dengan struktur berikut:\n" +
+                    "[\n  {\"id\": 1, \"score\": 85, \"feedback\": \"komentar singkat\"},\n  ...\n]\n" +
+                    "Pastikan nilai 'score' berupa angka bulat (integer) antara 0 sampai 100.\n\nData Ujian:\n" + examDataString;
 
                 const payload = {
                     contents: [{
@@ -235,7 +235,7 @@
                         parts: [{ text: promptText }]
                     }],
                     generationConfig: {
-                        responseMimeType: "application/json"
+                        temperature: 0.2
                     }
                 };
 
@@ -261,18 +261,33 @@
                     }
 
                     let textResponse = result.candidates[0].content.parts[0].text;
+                    
+                    // Membersihkan markdown format blok kode ```json ... ```
                     textResponse = textResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
                     
+                    // Mencari teks array JSON jika ada sisa karakter lain
+                    const firstBracket = textResponse.indexOf('[');
+                    const lastBracket = textResponse.lastIndexOf(']');
+                    if (firstBracket !== -1 && lastBracket !== -1) {
+                        textResponse = textResponse.substring(firstBracket, lastBracket + 1);
+                    }
+
                     const parsedResults = JSON.parse(textResponse);
                     const newAiResults = {};
                     let totalScore = 0;
+                    let count = 0;
 
                     parsedResults.forEach(res => {
-                        newAiResults[res.id] = res;
-                        totalScore += res.score;
+                        const numericScore = Number(res.score) || 0;
+                        newAiResults[res.id] = {
+                            score: numericScore,
+                            feedback: res.feedback || "Evaluasi selesai."
+                        };
+                        totalScore += numericScore;
+                        count++;
                     });
                     
-                    const finalEssayScore = Math.round(totalScore / essayQuestions.length);
+                    const finalEssayScore = count > 0 ? Math.round(totalScore / count) : 0;
 
                     setState(prev => ({
                         ...prev,
@@ -285,7 +300,7 @@
                     
                 } catch (err) {
                     console.error("Kesalahan API:", err);
-                    setState(prev => ({ ...prev, isEvaluating: false, error: err.message || "Gagal memproses data dari API." }));
+                    setState(prev => ({ ...prev, isEvaluating: false, error: "Gagal parsing JSON: " + err.message }));
                 }
             };
 
@@ -389,7 +404,7 @@
         }
 
         function App() {
-            const [activeTab, setActiveTab] = useState('pg');
+            const [activeTab, setActiveTab] = useState('esai');
             const [apiKey, setApiKey] = useState(getSavedApiKey);
             const [modelName, setModelName] = useState(getSavedModel);
             
