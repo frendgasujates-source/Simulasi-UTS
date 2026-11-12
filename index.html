@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simulasi UTS Anatomi</title>
     
+    <!-- PENGGANTI COMPILER: Menggunakan Babel 7 terbaru agar tidak crash saat membaca JavaScript modern -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     
     <style>
@@ -74,6 +75,14 @@
             { id: 5, question: "Dalam prosedur medis transfusi darah, dikenal istilah Donor Universal dan Resipien Universal. Jelaskan maknanya dan sebutkan golongan darah lengkap (sistem ABO dan Rh) yang mewakili keduanya!", keyAnswer: "• Donor Universal (Golongan Darah O-): Dapat mendonorkan sel darah merah ke SEMUA golongan darah karena eritrositnya tidak memiliki antigen A, antigen B, maupun antigen Rhesus (Rh).\n• Resipien Universal (Golongan Darah AB+): Dapat menerima transfusi darah dari SEMUA golongan karena plasma darahnya tidak memiliki antibodi penolak (anti-A, anti-B) dan sudah memiliki faktor Rhesus positif." }
         ];
 
+        // --- Fungsi pembantu agar tidak bentrok (tanpa optional chaining) ---
+        const scrollToHeader = () => {
+            const header = document.getElementById('header-title');
+            if (header) {
+                header.scrollIntoView({ behavior: 'smooth' });
+            }
+        };
+
         const MultipleChoiceTab = ({ state, setState }) => {
             const { answers, isSubmitted, score, showError } = state;
 
@@ -91,7 +100,7 @@
                 pgQuestions.forEach(q => { if (answers[q.id] === q.answerIndex) correctCount++; });
                 const finalScore = Math.round((correctCount / pgQuestions.length) * 100);
                 setState(prev => ({ ...prev, isSubmitted: true, score: finalScore, showError: false }));
-                document.getElementById('header-title')?.scrollIntoView({ behavior: 'smooth' });
+                scrollToHeader();
             };
 
             return (
@@ -198,7 +207,7 @@
             const evaluateWithAI = async () => {
                 if (!apiKey) {
                     setState(prev => ({ ...prev, error: "API Key kosong! Silakan isi di kotak atas." }));
-                    document.getElementById('header-title')?.scrollIntoView();
+                    scrollToHeader();
                     return;
                 }
 
@@ -209,7 +218,6 @@
 
                 setState(prev => ({ ...prev, isEvaluating: true, error: null }));
 
-                // Memisahkan JSON parsing dari literal template untuk kestabilan Babel
                 const examDataString = JSON.stringify(
                     essayQuestions.map(q => ({
                         id: q.id,
@@ -232,9 +240,8 @@
                 };
 
                 try {
-                    // Menggunakan nama model dinamis yang diketik oleh pengguna
                     const currentModel = modelName.trim() || "gemini-1.5-flash";
-                    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
+                    const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + currentModel + ":generateContent?key=" + apiKey;
                     
                     const response = await fetch(endpoint, {
                         method: 'POST',
@@ -245,7 +252,8 @@
                     const result = await response.json();
                     
                     if (!response.ok) {
-                        throw new Error(`Error API (${response.status}): ${result.error?.message || response.statusText}`);
+                        let errorMsg = result.error && result.error.message ? result.error.message : response.statusText;
+                        throw new Error("Error API (" + response.status + "): " + errorMsg);
                     }
 
                     if (!result.candidates || result.candidates.length === 0) {
@@ -273,7 +281,7 @@
                         isSubmitted: true,
                         score: finalEssayScore
                     }));
-                    document.getElementById('header-title')?.scrollIntoView();
+                    scrollToHeader();
                     
                 } catch (err) {
                     console.error("Kesalahan API:", err);
@@ -290,4 +298,151 @@
                         </div>
                         {!isSubmitted && (
                             <button onClick={evaluateWithAI} disabled={isEvaluating} className="bg-cyan-600 text-white px-6 py-3 rounded-full font-bold shadow-md">
-                                {isEvaluating ? '⏳ Memproses...' : '✨ Evaluasi AI
+                                {isEvaluating ? '⏳ Memproses...' : '✨ Evaluasi AI'}
+                            </button>
+                        )}
+                    </div>
+
+                    {error && (
+                        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl flex">
+                            <span className="mr-3">⚠️</span>
+                            <p className="text-sm font-semibold break-words flex-1">{error}</p>
+                        </div>
+                    )}
+
+                    {isSubmitted && (
+                        <div className="bg-gradient-to-br from-cyan-600 to-blue-800 text-white p-8 rounded-2xl text-center shadow-lg">
+                            <h2 className="text-2xl font-bold mb-2">Nilai Analisis Esai</h2>
+                            <div className="text-6xl font-black mb-4">{score} <span className="text-3xl text-cyan-200">/ 100</span></div>
+                            <button onClick={() => setState({ answers: {}, showExplanation: {}, aiResults: null, isEvaluating: false, isSubmitted: false, score: 0, error: null })} className="bg-white text-cyan-800 font-bold py-3 px-8 rounded-full">Tulis Ulang</button>
+                        </div>
+                    )}
+
+                    {essayQuestions.map((q, index) => {
+                        const isShowing = showExplanation[q.id];
+                        const aiFeedback = aiResults && aiResults[q.id];
+                        
+                        return (
+                            <div key={q.id} className="bg-white p-5 md:p-7 rounded-2xl shadow-sm border">
+                                <div className="flex gap-4 mb-5">
+                                    <span className="font-black text-xl text-cyan-700 bg-cyan-50 h-10 w-10 flex items-center justify-center rounded-xl shrink-0">{index + 1}</span>
+                                    <p className="font-bold text-gray-800 pt-1.5">{q.question}</p>
+                                </div>
+                                <div className="md:ml-14 mb-4">
+                                    <textarea
+                                        className="w-full p-4 border-2 rounded-xl focus:border-cyan-500 outline-none text-gray-800 bg-gray-50 min-h-[140px]"
+                                        placeholder="Ketik jawaban Anda..."
+                                        value={answers[q.id] || ''}
+                                        onChange={(e) => handleTextChange(q.id, e.target.value)}
+                                        disabled={isSubmitted}
+                                    ></textarea>
+                                </div>
+                                {aiFeedback && (
+                                    <div className="md:ml-14 mb-5 bg-cyan-50 border-l-4 border-cyan-500 p-5 rounded-r-xl">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h4 className="font-bold text-cyan-900">🤖 Catatan Dosen AI</h4>
+                                            <span className="font-bold px-4 py-1 rounded-lg bg-white shadow-sm">Skor: {aiFeedback.score}</span>
+                                        </div>
+                                        <p className="text-gray-700 text-sm italic">"{aiFeedback.feedback}"</p>
+                                    </div>
+                                )}
+                                <div className="md:ml-14">
+                                    <button onClick={() => toggleExplanation(q.id)} className="text-sm font-bold text-gray-500 hover:text-cyan-700">
+                                        {isShowing ? '🔼 Sembunyikan' : '🔽 Lihat Referensi'}
+                                    </button>
+                                    {isShowing && (
+                                        <div className="mt-4 p-5 bg-gray-50 border rounded-xl">
+                                            <p className="text-gray-700 whitespace-pre-line text-sm">{q.keyAnswer}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        const DashboardTab = ({ pgScore, essayScore, isPgSubmitted, isEssaySubmitted, setActiveTab }) => {
+            const finalScore = Math.round((pgScore + essayScore) / 2);
+            return (
+                <div className="bg-white p-8 md:p-12 rounded-3xl shadow-sm border text-center max-w-3xl mx-auto">
+                    <h2 className="text-3xl font-black text-gray-800 mb-8">Kalkulasi Nilai Akhir</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                        <div className="bg-teal-50 border border-teal-100 p-8 rounded-2xl">
+                            <h3 className="font-bold text-teal-800 mb-4">PG</h3>
+                            {isPgSubmitted ? <div className="text-5xl font-black text-teal-600">{pgScore}</div> : <button onClick={() => setActiveTab('pg')} className="bg-teal-600 text-white px-4 py-2 rounded-full">Kerjakan</button>}
+                        </div>
+                        <div className="bg-cyan-50 border border-cyan-100 p-8 rounded-2xl">
+                            <h3 className="font-bold text-cyan-800 mb-4">Esai AI</h3>
+                            {isEssaySubmitted ? <div className="text-5xl font-black text-cyan-600">{essayScore}</div> : <button onClick={() => setActiveTab('esai')} className="bg-cyan-600 text-white px-4 py-2 rounded-full">Kerjakan</button>}
+                        </div>
+                    </div>
+                    {isPgSubmitted && isEssaySubmitted && (
+                        <div className="bg-gray-900 text-white p-10 rounded-3xl shadow-lg">
+                            <h3 className="text-xl font-bold mb-4 text-gray-300">Skor Kumulatif UTS</h3>
+                            <div className="text-8xl font-black mb-6">{finalScore}</div>
+                        </div>
+                    )}
+                </div>
+            )
+        }
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('pg');
+            const [apiKey, setApiKey] = useState(getSavedApiKey);
+            const [modelName, setModelName] = useState(getSavedModel);
+            
+            const [pgState, setPgState] = useState({ answers: {}, isSubmitted: false, score: 0, showError: false });
+            const [essayState, setEssayState] = useState({ answers: {}, showExplanation: {}, aiResults: null, isEvaluating: false, isSubmitted: false, score: 0, error: null });
+
+            return (
+                <div className="min-h-screen flex flex-col font-sans" id="header-title">
+                    <header className="bg-teal-900 text-white py-5 shadow-lg">
+                        <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                            <div>
+                                <h1 className="text-2xl font-black">UTS Anatomi Fisiologi</h1>
+                                <p className="text-teal-200 text-sm">S1 Farmasi</p>
+                            </div>
+                            <div className="flex gap-2 w-full md:w-auto">
+                                <input 
+                                    type="password" 
+                                    placeholder="API Key..." 
+                                    value={apiKey}
+                                    onChange={(e) => { setApiKey(e.target.value); saveApiKey(e.target.value); }}
+                                    className="flex-1 bg-white/10 border border-white/30 rounded-lg p-2 text-sm text-white"
+                                />
+                                <input 
+                                    type="text" 
+                                    placeholder="Nama Model" 
+                                    value={modelName}
+                                    onChange={(e) => { setModelName(e.target.value); saveModel(e.target.value); }}
+                                    className="w-40 bg-white/10 border border-white/30 rounded-lg p-2 text-sm text-white text-center"
+                                />
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-6xl mx-auto px-4 mt-8 w-full">
+                        <div className="flex bg-white p-1 rounded-xl mb-8 shadow-sm border">
+                            {[{ id: 'pg', label: '1. Pilihan Ganda' }, { id: 'esai', label: '2. Esai (AI)' }, { id: 'hasil', label: '3. Hasil' }].map(tab => (
+                                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-sm font-bold rounded-lg ${activeTab === tab.id ? 'bg-teal-600 text-white' : 'text-gray-500'}`}>
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="pb-20">
+                            {activeTab === 'pg' && <MultipleChoiceTab state={pgState} setState={setPgState} />}
+                            {activeTab === 'esai' && <EssayTab state={essayState} setState={setEssayState} apiKey={apiKey} modelName={modelName} />}
+                            {activeTab === 'hasil' && <DashboardTab pgScore={pgState.score} essayScore={essayState.score} isPgSubmitted={pgState.isSubmitted} isEssaySubmitted={essayState.isSubmitted} setActiveTab={setActiveTab} />}
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
