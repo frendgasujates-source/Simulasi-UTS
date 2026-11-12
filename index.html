@@ -4,37 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simulasi UTS Anatomi</title>
-    
+
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    
+
     <style>
-        body, html { width: 100%; height: 100%; overflow-x: hidden; }
+        /* FIX: jangan pakai height:100% -> body tidak jadi scroll container sendiri.
+           Scroll tetap di viewport, jadi posisi tidak melompat. */
+        html { scroll-behavior: smooth; }
+        body { margin: 0; width: 100%; overflow-x: hidden; }
     </style>
 </head>
 <body class="bg-teal-50/50">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useLayoutEffect, useRef } = React;
 
         const getSavedApiKey = () => {
-            try { return window.localStorage.getItem('geminiApiKey') || ''; } 
+            try { return window.localStorage.getItem('geminiApiKey') || ''; }
             catch (e) { return ''; }
         };
         const saveApiKey = (key) => {
-            try { window.localStorage.setItem('geminiApiKey', key); } 
+            try { window.localStorage.setItem('geminiApiKey', key); }
             catch (e) { }
         };
 
         const getSavedModel = () => {
-            try { return window.localStorage.getItem('geminiModel') || 'gemini-1.5-flash'; } 
+            try { return window.localStorage.getItem('geminiModel') || 'gemini-1.5-flash'; }
             catch (e) { return 'gemini-1.5-flash'; }
         };
         const saveModel = (model) => {
-            try { window.localStorage.setItem('geminiModel', model); } 
+            try { window.localStorage.setItem('geminiModel', model); }
             catch (e) { }
         };
 
@@ -74,18 +77,33 @@
             { id: 5, question: "Dalam prosedur medis transfusi darah, dikenal istilah Donor Universal dan Resipien Universal. Jelaskan maknanya dan sebutkan golongan darah lengkap (sistem ABO dan Rh) yang mewakili keduanya!", keyAnswer: "• Donor Universal (Golongan Darah O-): Dapat mendonorkan sel darah merah ke SEMUA golongan darah karena eritrositnya tidak memiliki antigen A, antigen B, maupun antigen Rhesus (Rh).\n• Resipien Universal (Golongan Darah AB+): Dapat menerima transfusi darah dari SEMUA golongan karena plasma darahnya tidak memiliki antibodi penolak (anti-A, anti-B) dan sudah memiliki faktor Rhesus positif." }
         ];
 
-        const scrollToHeader = () => {
-            const header = document.getElementById('header-title');
-            if (header) { header.scrollIntoView({ behavior: 'smooth' }); }
+        // FIX: scroll ke atas pakai window.scrollTo, bukan scrollIntoView ke wrapper
+        const scrollToTop = () => {
+            const el = document.scrollingElement || document.documentElement;
+            el.scrollTop = 0;
         };
 
         const MultipleChoiceTab = ({ state, setState }) => {
             const { answers, isSubmitted, score, showError } = state;
 
+            // FIX: simpan posisi scroll sebelum state berubah
+            const scrollPos = useRef(null);
+
             const handleOptionChange = (questionId, optionIndex) => {
-                if (isSubmitted) return; 
+                if (isSubmitted) return;
+                scrollPos.current = (document.scrollingElement || document.documentElement).scrollTop;
                 setState(prev => ({ ...prev, answers: { ...prev.answers, [questionId]: optionIndex }, showError: false }));
             };
+
+            // FIX: kunci posisi scroll setelah re-render (sebelum paint + 1 frame setelahnya)
+            useLayoutEffect(() => {
+                if (scrollPos.current === null) return;
+                const el = document.scrollingElement || document.documentElement;
+                const y = scrollPos.current;
+                el.scrollTop = y;
+                const raf = requestAnimationFrame(() => { el.scrollTop = y; });
+                return () => cancelAnimationFrame(raf);
+            }, [answers]);
 
             const handleSubmit = () => {
                 if (Object.keys(answers).length < pgQuestions.length) {
@@ -96,7 +114,13 @@
                 pgQuestions.forEach(q => { if (answers[q.id] === q.answerIndex) correctCount++; });
                 const finalScore = Math.round((correctCount / pgQuestions.length) * 100);
                 setState(prev => ({ ...prev, isSubmitted: true, score: finalScore, showError: false }));
-                scrollToHeader();
+                requestAnimationFrame(scrollToTop);
+            };
+
+            const handleReset = () => {
+                scrollPos.current = null;
+                setState({ answers: {}, isSubmitted: false, score: 0, showError: false });
+                requestAnimationFrame(scrollToTop);
             };
 
             return (
@@ -122,7 +146,7 @@
                             <div className="text-6xl font-black mb-4 text-emerald-300">
                                 {score} <span className="text-2xl text-teal-100">/ 100</span>
                             </div>
-                            <button onClick={() => setState({ answers: {}, isSubmitted: false, score: 0, showError: false })} className="bg-white text-teal-700 font-bold py-3 px-8 rounded-full shadow-md">Ulangi Kuis</button>
+                            <button onClick={handleReset} className="bg-white text-teal-700 font-bold py-3 px-8 rounded-full shadow-md">Ulangi Kuis</button>
                         </div>
                     )}
 
@@ -130,41 +154,52 @@
                         const userAnswer = answers[q.id];
                         const isCorrect = userAnswer === q.answerIndex;
                         const isAnswered = userAnswer !== undefined;
-                        
+
                         let cardClass = "bg-white p-5 md:p-6 rounded-2xl shadow-sm border transition-all duration-300 ";
                         if (isSubmitted) {
                             cardClass += isCorrect ? "border-emerald-500 bg-emerald-50/10" : "border-rose-400 bg-rose-50/10";
                         } else {
                             cardClass += isAnswered ? "border-teal-300 bg-teal-50/30" : "border-gray-200";
                         }
-                        
+
                         return (
                             <div key={q.id} className={cardClass}>
                                 <div className="flex gap-3 md:gap-4">
                                     <span className="font-black text-xl text-teal-700 shrink-0">{index + 1}.</span>
                                     <div className="flex-1">
                                         <p className="font-semibold text-gray-800 mb-5 text-base leading-relaxed">{q.question}</p>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3" role="radiogroup">
                                             {q.options.map((opt, optIndex) => {
                                                 const isSelected = userAnswer === optIndex;
                                                 const isCorrectOption = q.answerIndex === optIndex;
-                                                let optionClass = "flex items-center p-3.5 rounded-xl border-2 transition-all cursor-pointer ";
-                                                
+                                                let optionClass = "flex items-center w-full text-left p-3.5 rounded-xl border-2 transition-all ";
+
                                                 if (isSubmitted) {
                                                     if (isCorrectOption) optionClass += "bg-emerald-100 border-emerald-500 text-emerald-900 font-semibold";
                                                     else if (isSelected) optionClass += "bg-rose-100 border-rose-400 text-rose-900 font-semibold";
                                                     else optionClass += "bg-gray-50 border-gray-100 opacity-50";
                                                 } else {
-                                                    optionClass += isSelected ? "bg-teal-100 border-teal-500 text-teal-900 font-semibold" : "bg-white border-gray-100 hover:bg-teal-50";
+                                                    optionClass += isSelected ? "bg-teal-100 border-teal-500 text-teal-900 font-semibold cursor-pointer" : "bg-white border-gray-100 hover:bg-teal-50 cursor-pointer";
                                                 }
 
                                                 return (
-                                                    <label key={optIndex} className={optionClass}>
-                                                        <input type="radio" name={`question-${q.id}`} className="sr-only" checked={isSelected} onChange={() => handleOptionChange(q.id, optIndex)} disabled={isSubmitted} />
+                                                    /* FIX: pakai <button> + onMouseDown preventDefault.
+                                                       Klik tidak memfokuskan elemen tersembunyi, jadi browser
+                                                       tidak auto-scroll dan layar tidak lompat/putih. */
+                                                    <button
+                                                        key={optIndex}
+                                                        type="button"
+                                                        role="radio"
+                                                        aria-checked={isSelected}
+                                                        disabled={isSubmitted}
+                                                        onMouseDown={(e) => e.preventDefault()}
+                                                        onClick={() => handleOptionChange(q.id, optIndex)}
+                                                        className={optionClass}
+                                                    >
                                                         <span className="flex-1 text-sm">{opt}</span>
                                                         {isSubmitted && isCorrectOption && <span className="ml-2">✅</span>}
                                                         {isSubmitted && isSelected && !isCorrectOption && <span className="ml-2">❌</span>}
-                                                    </label>
+                                                    </button>
                                                 )
                                             })}
                                         </div>
@@ -203,7 +238,7 @@
             const evaluateWithAI = async () => {
                 if (!apiKey) {
                     setState(prev => ({ ...prev, error: "API Key kosong! Silakan isi di kotak atas." }));
-                    scrollToHeader();
+                    scrollToTop();
                     return;
                 }
 
@@ -223,7 +258,6 @@
                     }))
                 );
 
-                // Instruksi format JSON yang diperketat agar AI wajib mengembalikan array berformat angka valid
                 const promptText = "Anda adalah Dosen Anatomi S1 Farmasi. Evaluasi jawaban mahasiswa berdasarkan kunci jawaban referensi.\n" +
                     "Berikan output HANYA dalam bentuk format JSON ARRAY murni tanpa teks pembuka/penutup, dengan struktur berikut:\n" +
                     "[\n  {\"id\": 1, \"score\": 85, \"feedback\": \"komentar singkat\"},\n  ...\n]\n" +
@@ -242,7 +276,7 @@
                 try {
                     const currentModel = modelName.trim() || "gemini-1.5-flash";
                     const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + currentModel + ":generateContent?key=" + apiKey;
-                    
+
                     const response = await fetch(endpoint, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -250,7 +284,7 @@
                     });
 
                     const result = await response.json();
-                    
+
                     if (!response.ok) {
                         let errorMsg = result.error && result.error.message ? result.error.message : response.statusText;
                         throw new Error("Error API (" + response.status + "): " + errorMsg);
@@ -261,11 +295,9 @@
                     }
 
                     let textResponse = result.candidates[0].content.parts[0].text;
-                    
-                    // Membersihkan markdown format blok kode ```json ... ```
+
                     textResponse = textResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
-                    
-                    // Mencari teks array JSON jika ada sisa karakter lain
+
                     const firstBracket = textResponse.indexOf('[');
                     const lastBracket = textResponse.lastIndexOf(']');
                     if (firstBracket !== -1 && lastBracket !== -1) {
@@ -286,7 +318,7 @@
                         totalScore += numericScore;
                         count++;
                     });
-                    
+
                     const finalEssayScore = count > 0 ? Math.round(totalScore / count) : 0;
 
                     setState(prev => ({
@@ -296,8 +328,8 @@
                         isSubmitted: true,
                         score: finalEssayScore
                     }));
-                    scrollToHeader();
-                    
+                    requestAnimationFrame(scrollToTop);
+
                 } catch (err) {
                     console.error("Kesalahan API:", err);
                     setState(prev => ({ ...prev, isEvaluating: false, error: "Gagal parsing JSON: " + err.message }));
@@ -336,7 +368,7 @@
                     {essayQuestions.map((q, index) => {
                         const isShowing = showExplanation[q.id];
                         const aiFeedback = aiResults && aiResults[q.id];
-                        
+
                         return (
                             <div key={q.id} className="bg-white p-5 md:p-7 rounded-2xl shadow-sm border">
                                 <div className="flex gap-4 mb-5">
@@ -407,9 +439,15 @@
             const [activeTab, setActiveTab] = useState('esai');
             const [apiKey, setApiKey] = useState(getSavedApiKey);
             const [modelName, setModelName] = useState(getSavedModel);
-            
+
             const [pgState, setPgState] = useState({ answers: {}, isSubmitted: false, score: 0, showError: false });
             const [essayState, setEssayState] = useState({ answers: {}, showExplanation: {}, aiResults: null, isEvaluating: false, isSubmitted: false, score: 0, error: null });
+
+            // FIX: ganti tab selalu mulai dari atas
+            const changeTab = (id) => {
+                setActiveTab(id);
+                requestAnimationFrame(scrollToTop);
+            };
 
             return (
                 <div className="min-h-screen flex flex-col font-sans" id="header-title">
@@ -420,16 +458,16 @@
                                 <p className="text-teal-200 text-sm">S1 Farmasi</p>
                             </div>
                             <div className="flex gap-2 w-full md:w-auto">
-                                <input 
-                                    type="password" 
-                                    placeholder="API Key..." 
+                                <input
+                                    type="password"
+                                    placeholder="API Key..."
                                     value={apiKey}
                                     onChange={(e) => { setApiKey(e.target.value); saveApiKey(e.target.value); }}
                                     className="flex-1 bg-white/10 border border-white/30 rounded-lg p-2 text-sm text-white"
                                 />
-                                <input 
-                                    type="text" 
-                                    placeholder="Nama Model" 
+                                <input
+                                    type="text"
+                                    placeholder="Nama Model"
                                     value={modelName}
                                     onChange={(e) => { setModelName(e.target.value); saveModel(e.target.value); }}
                                     className="w-40 bg-white/10 border border-white/30 rounded-lg p-2 text-sm text-white text-center"
@@ -441,7 +479,7 @@
                     <main className="max-w-6xl mx-auto px-4 mt-8 w-full">
                         <div className="flex bg-white p-1 rounded-xl mb-8 shadow-sm border">
                             {[{ id: 'pg', label: '1. Pilihan Ganda' }, { id: 'esai', label: '2. Esai (AI)' }, { id: 'hasil', label: '3. Hasil' }].map(tab => (
-                                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-sm font-bold rounded-lg ${activeTab === tab.id ? 'bg-teal-600 text-white' : 'text-gray-500'}`}>
+                                <button key={tab.id} onClick={() => changeTab(tab.id)} className={`flex-1 py-3 text-sm font-bold rounded-lg ${activeTab === tab.id ? 'bg-teal-600 text-white' : 'text-gray-500'}`}>
                                     {tab.label}
                                 </button>
                             ))}
@@ -449,7 +487,7 @@
                         <div className="pb-20">
                             {activeTab === 'pg' && <MultipleChoiceTab state={pgState} setState={setPgState} />}
                             {activeTab === 'esai' && <EssayTab state={essayState} setState={setEssayState} apiKey={apiKey} modelName={modelName} />}
-                            {activeTab === 'hasil' && <DashboardTab pgScore={pgState.score} essayScore={essayState.score} isPgSubmitted={pgState.isSubmitted} isEssaySubmitted={essayState.isSubmitted} setActiveTab={setActiveTab} />}
+                            {activeTab === 'hasil' && <DashboardTab pgScore={pgState.score} essayScore={essayState.score} isPgSubmitted={pgState.isSubmitted} isEssaySubmitted={essayState.isSubmitted} setActiveTab={changeTab} />}
                         </div>
                     </main>
                 </div>
